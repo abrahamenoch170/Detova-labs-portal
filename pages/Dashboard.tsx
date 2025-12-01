@@ -206,25 +206,61 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
         ) : (
           <div className="space-y-3">
             {sortedTasks.map(task => (
-              <div key={task.id} className="bg-surface border-l-2 border-l-accent border-y border-r border-border p-4 flex items-center justify-between hover:bg-white/5 transition-all duration-200 group hover:border-l-accent-hover hover:shadow-[inset_0_0_20px_rgba(0,0,0,0.2)]">
-                <div className="flex items-center gap-4">
-                  <div className={`w-2 h-2 rounded-full ${task.is_blocker ? 'bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]' : 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.6)]'}`}></div>
+              <div 
+                key={task.id} 
+                className={`
+                  bg-surface border border-border p-4 flex items-center justify-between 
+                  transition-all duration-300 group relative overflow-hidden
+                  hover:shadow-[0_0_15px_rgba(0,0,0,0.3)] hover:-translate-y-0.5
+                  ${task.is_blocker 
+                    ? 'border-l-4 border-l-danger hover:border-danger/50' 
+                    : 'border-l-4 border-l-accent hover:border-accent/50'
+                  }
+                `}
+              >
+                {/* Background scanline effect on hover */}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none" />
+
+                <div className="flex items-center gap-4 relative z-10">
+                   {/* Status Dot */}
+                  <div className={`
+                    w-2 h-2 rounded-none transform rotate-45 
+                    ${task.is_blocker 
+                      ? 'bg-danger shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse' 
+                      : 'bg-accent shadow-[0_0_8px_rgba(190,242,100,0.6)]'
+                    }
+                  `} />
+                  
                   <div>
-                    <p className="text-offwhite font-medium text-sm group-hover:text-accent transition-colors">{task.description}</p>
+                    <p className={`
+                      font-medium text-sm transition-colors duration-200
+                      ${task.is_blocker ? 'text-danger group-hover:text-red-400' : 'text-offwhite group-hover:text-accent'}
+                    `}>
+                      {task.description}
+                    </p>
                     <div className="flex items-center gap-3 mt-1">
-                      <p className="text-xs text-silver/60 font-mono group-hover:text-silver/80">ID: {task.id.toUpperCase()}</p>
-                      <span className="text-[10px] text-silver/40 font-mono">|</span>
-                      <p className="text-xs text-silver/60 font-mono group-hover:text-silver/80">
-                        CREATED: {new Date(task.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      <p className="text-[10px] text-silver/60 font-mono tracking-wider">
+                        ID: <span className="text-silver">{task.id.toUpperCase()}</span>
+                      </p>
+                      <span className="text-[10px] text-silver/30 font-mono">|</span>
+                      <p className="text-[10px] text-silver/60 font-mono tracking-wider">
+                        REQ: <span className="text-silver">{new Date(task.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                       </p>
                     </div>
                   </div>
                 </div>
-                {task.is_blocker ? (
-                  <Badge variant="error" className="shadow-[0_0_10px_rgba(239,68,68,0.2)]">BLOCKER</Badge>
-                ) : (
-                  <Badge variant="neutral">{task.status}</Badge>
-                )}
+
+                <div className="relative z-10">
+                  {task.is_blocker ? (
+                    <Badge variant="error" className="shadow-[0_0_15px_rgba(239,68,68,0.4)] border-danger text-danger bg-danger/10 animate-pulse">
+                      ⚠ BLOCKER
+                    </Badge>
+                  ) : (
+                    <Badge variant="neutral" className="group-hover:border-accent/50 group-hover:text-accent transition-colors">
+                      {task.status}
+                    </Badge>
+                  )}
+                </div>
               </div>
             ))}
           </div>

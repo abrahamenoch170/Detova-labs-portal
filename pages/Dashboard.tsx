@@ -1,22 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { User, Task, Project } from '../types';
-import { PlusCircle, AlertOctagon, ExternalLink, CheckCircle, ArrowUp, ArrowDown, ListFilter, ArrowUpDown, Terminal, Zap } from 'lucide-react';
+import { PlusCircle, AlertOctagon, ExternalLink, CheckCircle, ArrowUp, ArrowDown, ListFilter, ArrowUpDown, Terminal, Zap, Trash2, Square } from 'lucide-react';
 
 interface DashboardProps {
   user: User;
   tasks: Task[];
   projects: Project[];
   onAddTask: (task: Partial<Task>) => void;
+  onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
+  onDeleteTask: (taskId: string) => void;
   onChangeView: (view: any) => void;
 }
 
 type SortKey = 'created_at' | 'status';
 type SortDirection = 'asc' | 'desc';
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onAddTask, onChangeView }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onAddTask, onUpdateTask, onDeleteTask, onChangeView }) => {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'created_at',
     direction: 'desc'
@@ -26,6 +28,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || '');
   const [isBlocker, setIsBlocker] = useState(false);
+  
+  const taskInputRef = useRef<HTMLInputElement>(null);
 
   const handleSort = (key: SortKey) => {
     setSortConfig(current => ({
@@ -46,6 +50,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
 
     setNewTaskDesc('');
     setIsBlocker(false);
+  };
+
+  const handleReportBlocker = () => {
+    setIsBlocker(true);
+    if (taskInputRef.current) {
+      taskInputRef.current.focus();
+      taskInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
   const getSortedTasks = () => {
@@ -108,7 +120,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
             <p className="text-sm text-silver">Initialize new project protocol.</p>
           </Card>
 
-          <Card className="group cursor-pointer">
+          <Card className="group cursor-pointer" onClick={handleReportBlocker}>
             <div className="flex items-start justify-between mb-4">
               <AlertOctagon className="text-silver group-hover:text-red-500 transition-colors duration-200" size={24} />
               <span className="text-[10px] font-mono text-silver/50">ER-99</span>
@@ -130,20 +142,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
 
       {/* Protocol Initialization Form */}
       <section>
-        <Card className="border-t-4 border-t-accent p-0 overflow-hidden">
+        <Card className={`border-t-4 p-0 overflow-hidden transition-colors duration-300 ${isBlocker ? 'border-t-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]' : 'border-t-accent'}`}>
           <div className="bg-surface/50 p-4 border-b border-border flex items-center gap-2">
-             <Terminal size={16} className="text-accent" />
-             <h3 className="text-xs font-mono font-bold text-accent tracking-widest uppercase">PROTOCOL_INIT // NEW_TASK</h3>
+             <Terminal size={16} className={isBlocker ? "text-red-500" : "text-accent"} />
+             <h3 className={`text-xs font-mono font-bold tracking-widest uppercase ${isBlocker ? "text-red-500" : "text-accent"}`}>
+               {isBlocker ? 'CRITICAL_PROTOCOL_INIT // BLOCKER_REPORT' : 'PROTOCOL_INIT // NEW_TASK'}
+             </h3>
           </div>
           <form onSubmit={handleCreateTask} className="p-6 grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
             <div className="md:col-span-6">
               <label className="block text-[10px] font-mono text-silver mb-2 uppercase">Protocol Description</label>
               <input 
+                ref={taskInputRef}
                 type="text" 
                 value={newTaskDesc}
                 onChange={(e) => setNewTaskDesc(e.target.value)}
-                className="w-full bg-carbon border border-border p-3 text-offwhite focus:border-accent focus:outline-none font-mono text-sm placeholder-silver/30"
-                placeholder="Enter directive details..."
+                className={`w-full bg-carbon border p-3 text-offwhite focus:outline-none font-mono text-sm placeholder-silver/30 transition-colors ${
+                  isBlocker ? 'border-red-900 focus:border-red-500' : 'border-border focus:border-accent'
+                }`}
+                placeholder={isBlocker ? "Describe the critical failure..." : "Enter directive details..."}
               />
             </div>
             
@@ -169,9 +186,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
               >
                 <AlertOctagon size={18} />
               </button>
-              <Button type="submit" disabled={!newTaskDesc} className="flex-[3]">
+              <Button type="submit" disabled={!newTaskDesc} className={`flex-[3] ${isBlocker ? 'bg-red-500 hover:bg-red-600 text-white' : ''}`}>
                 <Zap size={16} className="mr-2" />
-                INITIALIZE
+                {isBlocker ? 'REPORT' : 'INITIALIZE'}
               </Button>
             </div>
           </form>
@@ -221,26 +238,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
                 {/* Background scanline effect on hover */}
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none" />
 
-                <div className="flex items-center gap-4 relative z-10">
-                   {/* Status Dot */}
-                  <div className={`
-                    w-2 h-2 rounded-none transform rotate-45 
-                    ${task.is_blocker 
-                      ? 'bg-danger shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse' 
-                      : 'bg-accent shadow-[0_0_8px_rgba(190,242,100,0.6)]'
-                    }
-                  `} />
+                <div className="flex items-center gap-4 relative z-10 flex-1">
+                   {/* Complete Button */}
+                  <button 
+                    onClick={() => onUpdateTask(task.id, { status: 'Done' })}
+                    className={`
+                      w-6 h-6 flex items-center justify-center border transition-all duration-200
+                      ${task.is_blocker 
+                        ? 'border-red-500/50 hover:bg-red-500 hover:text-white text-transparent' 
+                        : 'border-accent/50 hover:bg-accent hover:text-carbon text-transparent'
+                      }
+                    `}
+                    title="Mark Complete"
+                  >
+                    <CheckCircle size={14} />
+                  </button>
                   
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p className={`
-                      font-medium text-sm transition-colors duration-200
+                      font-medium text-sm transition-colors duration-200 truncate pr-4
                       ${task.is_blocker ? 'text-danger group-hover:text-red-400' : 'text-offwhite group-hover:text-accent'}
                     `}>
                       {task.description}
                     </p>
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-[10px] text-silver/60 font-mono tracking-wider">
-                        ID: <span className="text-silver">{task.id.toUpperCase()}</span>
+                        ID: <span className="text-silver">{task.id.slice(-4).toUpperCase()}</span>
                       </p>
                       <span className="text-[10px] text-silver/30 font-mono">|</span>
                       <p className="text-[10px] text-silver/60 font-mono tracking-wider">
@@ -250,7 +273,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
                   </div>
                 </div>
 
-                <div className="relative z-10">
+                <div className="relative z-10 flex items-center gap-3">
                   {task.is_blocker ? (
                     <Badge variant="error" className="shadow-[0_0_15px_rgba(239,68,68,0.4)] border-danger text-danger bg-danger/10 animate-pulse">
                       ⚠ BLOCKER
@@ -260,6 +283,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
                       {task.status}
                     </Badge>
                   )}
+                  
+                  <button 
+                    onClick={() => onDeleteTask(task.id)}
+                    className="text-silver/20 hover:text-red-500 transition-colors p-1"
+                    title="Delete Protocol"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
             ))}

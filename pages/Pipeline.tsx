@@ -3,16 +3,18 @@ import { Project, ProjectStatus } from '../types';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 
 interface PipelineProps {
   projects: Project[];
   onAddProject: (p: Omit<Project, 'id' | 'created_at' | 'owner_id' | 'score_market' | 'score_tech' | 'status'>) => void;
+  onUpdateProject: (id: string, updates: Partial<Project>) => void;
+  onDeleteProject: (id: string) => void;
 }
 
 const STATUS_COLS: ProjectStatus[] = ['Idea', 'Approved', 'In Progress', 'Shipped'];
 
-export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) => {
+export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject, onUpdateProject, onDeleteProject }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDesc, setNewDesc] = useState('');
@@ -23,6 +25,16 @@ export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) =>
     setIsModalOpen(false);
     setNewTitle('');
     setNewDesc('');
+  };
+
+  const handleMove = (project: Project, direction: 'next' | 'prev') => {
+    const currentIndex = STATUS_COLS.indexOf(project.status);
+    if (currentIndex === -1) return;
+    
+    const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+    if (newIndex >= 0 && newIndex < STATUS_COLS.length) {
+      onUpdateProject(project.id, { status: STATUS_COLS[newIndex] });
+    }
   };
 
   const getStatusColor = (status: ProjectStatus) => {
@@ -47,7 +59,7 @@ export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) =>
 
       <div className="flex-1 overflow-x-auto">
         <div className="flex gap-6 min-w-max pb-4 h-full">
-          {STATUS_COLS.map(status => (
+          {STATUS_COLS.map((status, colIndex) => (
             <div key={status} className="w-80 flex flex-col">
               <div className="flex items-center justify-between mb-4 px-2">
                 <h3 className="font-mono text-xs font-bold text-silver tracking-widest uppercase">{status}</h3>
@@ -58,11 +70,20 @@ export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) =>
               
               <div className="space-y-4 flex-1">
                 {projects.filter(p => p.status === status).map(project => (
-                  <Card key={project.id} className={`p-4 border-l-4 ${getStatusColor(project.status)} cursor-pointer group`}>
-                    <h4 className="font-bold text-offwhite mb-2 group-hover:text-accent transition-colors">{project.title}</h4>
+                  <Card key={project.id} className={`p-4 border-l-4 ${getStatusColor(project.status)} group relative`}>
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id); }}
+                        className="text-silver/20 hover:text-red-500 p-1"
+                      >
+                         <Trash2 size={12} />
+                      </button>
+                    </div>
+
+                    <h4 className="font-bold text-offwhite mb-2 group-hover:text-accent transition-colors pr-6">{project.title}</h4>
                     <p className="text-xs text-silver line-clamp-3 mb-4">{project.description}</p>
                     
-                    <div className="flex justify-between items-center border-t border-border pt-3">
+                    <div className="flex justify-between items-center border-t border-border pt-3 mb-3">
                       <div className="flex flex-col">
                         <span className="text-[9px] text-silver uppercase font-mono">MKT_SCORE</span>
                         <div className="w-16 h-1 bg-carbon mt-1">
@@ -75,6 +96,25 @@ export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) =>
                           <div className="h-full bg-blue-400" style={{ width: `${project.score_tech}%`}}></div>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Movement Controls */}
+                    <div className="flex items-center justify-between gap-2 opacity-10 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => handleMove(project, 'prev')}
+                        disabled={colIndex === 0}
+                        className="p-1 hover:bg-white/10 disabled:opacity-0 text-silver hover:text-white transition-all"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className="text-[10px] font-mono text-silver/30">STAGE_{colIndex + 1}</span>
+                      <button 
+                         onClick={() => handleMove(project, 'next')}
+                         disabled={colIndex === STATUS_COLS.length - 1}
+                         className="p-1 hover:bg-white/10 disabled:opacity-0 text-silver hover:text-white transition-all"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
                     </div>
                   </Card>
                 ))}
@@ -92,7 +132,7 @@ export const Pipeline: React.FC<PipelineProps> = ({ projects, onAddProject }) =>
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-carbon border border-accent p-8 w-full max-w-md shadow-[0_0_30px_rgba(190,242,100,0.1)] relative">
+          <div className="bg-carbon border border-accent p-8 w-full max-w-md shadow-[0_0_30px_rgba(190,242,100,0.1)] relative animate-fadeIn">
             <button onClick={() => setIsModalOpen(false)} className="absolute top-4 right-4 text-silver hover:text-accent">
               <X size={20} />
             </button>

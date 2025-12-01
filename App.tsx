@@ -1,24 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Pipeline } from './pages/Pipeline';
 import { Resources } from './pages/Resources';
 import { Button } from './components/ui/Button';
-import { View, User, Project, Task } from './types';
+import { ToastContainer } from './components/ui/Toast';
+import { View, User, Project, Task, Notification } from './types';
 import { login } from './services/auth';
 import { INITIAL_PROJECTS, INITIAL_TASKS } from './constants';
 import { ShieldAlert, Terminal } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
+  // Persistence Helpers
+  const loadState = <T,>(key: string, fallback: T): T => {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  };
+
+  const [user, setUser] = useState<User | null>(() => loadState('detova_user', null));
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [usernameInput, setUsernameInput] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
-  // App State
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
-  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  // App State with Persistence
+  const [projects, setProjects] = useState<Project[]>(() => loadState('detova_projects', INITIAL_PROJECTS));
+  const [tasks, setTasks] = useState<Task[]>(() => loadState('detova_tasks', INITIAL_TASKS));
+
+  // Persistence Effects
+  useEffect(() => localStorage.setItem('detova_user', JSON.stringify(user)), [user]);
+  useEffect(() => localStorage.setItem('detova_projects', JSON.stringify(projects)), [projects]);
+  useEffect(() => localStorage.setItem('detova_tasks', JSON.stringify(tasks)), [tasks]);
+
+  const addNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, message, type }]);
+  };
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,8 +51,10 @@ const App: React.FC = () => {
       const result = await login(usernameInput.toLowerCase().trim());
       if (result.success && result.user) {
         setUser(result.user);
+        addNotification(`WELCOME BACK, ${result.user.full_name}`);
       } else {
         setLoginError(result.error || 'Authentication Failed');
+        addNotification('ACCESS DENIED', 'error');
       }
     } catch (err) {
       setLoginError('System Malfunction');
@@ -39,6 +63,13 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLogout = () => {
+    setUser(null);
+    setCurrentView('dashboard');
+    localStorage.removeItem('detova_user');
+  };
+
+  // Project Handlers
   const handleAddProject = (newProjectData: Omit<Project, 'id' | 'created_at' | 'owner_id' | 'score_market' | 'score_tech' | 'status'>) => {
     if (!user) return;
     const newProject: Project = {
@@ -46,13 +77,26 @@ const App: React.FC = () => {
       ...newProjectData,
       status: 'Idea',
       owner_id: user.id,
-      score_market: 50,
-      score_tech: 50,
+      score_market: Math.floor(Math.random() * 100),
+      score_tech: Math.floor(Math.random() * 100),
       created_at: new Date().toISOString()
     };
     setProjects(prev => [...prev, newProject]);
+    addNotification('PROJECT INITIALIZED');
   };
 
+  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const handleDeleteProject = (id: string) => {
+    if (confirm('CONFIRM DELETION? This action is irreversible.')) {
+      setProjects(prev => prev.filter(p => p.id !== id));
+      addNotification('PROJECT TERMINATED', 'info');
+    }
+  };
+
+  // Task Handlers
   const handleAddTask = (taskData: Partial<Task>) => {
     if (!user) return;
     const newTask: Task = {
@@ -65,12 +109,24 @@ const App: React.FC = () => {
       created_at: new Date().toISOString()
     };
     setTasks(prev => [newTask, ...prev]);
+    addNotification(newTask.is_blocker ? 'CRITICAL ALERT REPORTED' : 'PROTOCOL ESTABLISHED');
+  };
+
+  const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+    if (updates.status === 'Done') {
+      addNotification('PROTOCOL COMPLETED');
+    }
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    addNotification('PROTOCOL PURGED', 'info');
   };
 
   if (!user) {
     return (
       <div className="min-h-screen bg-carbon flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        {/* Background Grid Effect */}
         <div className="absolute inset-0 z-0 opacity-10 pointer-events-none" 
              style={{ 
                backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', 
@@ -130,6 +186,7 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
+        <ToastContainer notifications={notifications} onDismiss={dismissNotification} />
       </div>
     );
   }
@@ -140,11 +197,10 @@ const App: React.FC = () => {
         currentView={currentView} 
         onChangeView={setCurrentView} 
         user={user}
-        onLogout={() => setUser(null)} 
+        onLogout={handleLogout} 
       />
       
       <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen bg-carbon relative">
-        {/* Subtle grid background */}
         <div className="absolute inset-0 z-0 opacity-5 pointer-events-none h-full w-full" 
              style={{ 
                backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', 
@@ -159,13 +215,24 @@ const App: React.FC = () => {
               tasks={tasks} 
               projects={projects}
               onAddTask={handleAddTask}
+              onUpdateTask={handleUpdateTask}
+              onDeleteTask={handleDeleteTask}
               onChangeView={setCurrentView} 
             />
           )}
-          {currentView === 'pipeline' && <Pipeline projects={projects} onAddProject={handleAddProject} />}
+          {currentView === 'pipeline' && (
+            <Pipeline 
+              projects={projects} 
+              onAddProject={handleAddProject} 
+              onUpdateProject={handleUpdateProject}
+              onDeleteProject={handleDeleteProject}
+            />
+          )}
           {currentView === 'resources' && <Resources />}
         </div>
       </main>
+
+      <ToastContainer notifications={notifications} onDismiss={dismissNotification} />
     </div>
   );
 };

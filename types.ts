@@ -42,3 +42,9 @@ export interface Resource {
 }
 
 export type View = 'dashboard' | 'pipeline' | 'resources';
+
+export interface Notification {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info';
+}

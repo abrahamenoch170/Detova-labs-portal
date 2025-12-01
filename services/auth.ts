@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { User } from '../types';
-import { ALLOWED_USERS, MOCK_USERS } from '../constants';
+import { ALLOWED_USERS } from '../constants';
 
 export const signInWithGithub = async () => {
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -22,33 +22,52 @@ export const getCurrentSession = async () => {
   return { session, error };
 };
 
-export const mapSupabaseUserToAppUser = (supabaseUser: any): { user: User | null; error?: string } => {
-  if (!supabaseUser) return { user: null };
-  
-  // Extract GitHub username from metadata (standard Supabase mapping)
-  const username = supabaseUser.user_metadata?.user_name || supabaseUser.email?.split('@')[0];
+// Syncs Supabase Auth user with our public.users table
+// Enforces Allowlist
+export const syncUserProfile = async (sessionUser: any): Promise<{ user: User | null; error?: string }> => {
+  if (!sessionUser) return { user: null };
+
+  const username = sessionUser.user_metadata?.user_name || sessionUser.email?.split('@')[0];
   
   if (!username) {
     return { user: null, error: 'IDENTITY_UNKNOWN' };
   }
 
-  // CRITICAL: Allowlist Check
-  // In a real app, this might be a DB query, but we are enforcing strict access via code/constants
+  // 1. ALLOWLIST CHECK
   if (!ALLOWED_USERS.includes(username)) {
     return { user: null, error: `ACCESS DENIED: USER '${username}' NOT AUTHORIZED` };
   }
 
-  // Map to our App's User structure
-  // We check MOCK_USERS to see if they have a predefined role, otherwise default to Contributor
-  const existingUser = MOCK_USERS.find(u => u.github_username === username);
-  
-  const appUser: User = {
-    id: supabaseUser.id,
+  // 2. CHECK DATABASE FOR PROFILE
+  const { data: existingProfile, error: fetchError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', sessionUser.id)
+    .single();
+
+  if (existingProfile) {
+    return { user: existingProfile as User };
+  }
+
+  // 3. CREATE PROFILE IF MISSING (First Time Login)
+  const newProfile: User = {
+    id: sessionUser.id,
     github_username: username,
-    full_name: supabaseUser.user_metadata?.full_name || username,
-    role: existingUser ? existingUser.role : 'Contributor',
-    avatar_url: supabaseUser.user_metadata?.avatar_url || ''
+    full_name: sessionUser.user_metadata?.full_name || username,
+    role: 'Contributor', // Default role
+    avatar_url: sessionUser.user_metadata?.avatar_url || ''
   };
 
-  return { user: appUser };
+  const { data: createdProfile, error: insertError } = await supabase
+    .from('users')
+    .insert([newProfile])
+    .select()
+    .single();
+
+  if (insertError) {
+    console.error('Profile creation failed:', insertError);
+    return { user: null, error: 'DATABASE_WRITE_ERROR' };
+  }
+
+  return { user: createdProfile as User };
 };

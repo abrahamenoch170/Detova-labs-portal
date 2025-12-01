@@ -6,74 +6,22 @@ import { Resources } from './pages/Resources';
 import { Button } from './components/ui/Button';
 import { ToastContainer } from './components/ui/Toast';
 import { View, User, Project, Task, Notification } from './types';
-import { signInWithGithub, signOut, getCurrentSession, mapSupabaseUserToAppUser } from './services/auth';
-import { supabase } from './lib/supabase';
-import { INITIAL_PROJECTS, INITIAL_TASKS } from './constants';
-import { ShieldAlert, Terminal, Github, Loader2 } from 'lucide-react';
+import { signInWithGithub, signOut, getCurrentSession, syncUserProfile } from './services/auth';
+import { supabase, isConfigured } from './lib/supabase';
+import { api } from './services/api';
+import { ShieldAlert, Terminal, Github, Loader2, Database } from 'lucide-react';
 
 const App: React.FC = () => {
-  // Persistence Helpers
-  const loadState = <T,>(key: string, fallback: T): T => {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : fallback;
-  };
-
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   
-  // App State with Persistence
-  const [projects, setProjects] = useState<Project[]>(() => loadState('detova_projects', INITIAL_PROJECTS));
-  const [tasks, setTasks] = useState<Task[]>(() => loadState('detova_tasks', INITIAL_TASKS));
-
-  // Persistence Effects
-  useEffect(() => localStorage.setItem('detova_projects', JSON.stringify(projects)), [projects]);
-  useEffect(() => localStorage.setItem('detova_tasks', JSON.stringify(tasks)), [tasks]);
-
-  // Auth Session Check
-  useEffect(() => {
-    const initAuth = async () => {
-      setIsLoading(true);
-      try {
-        const { session } = await getCurrentSession();
-        if (session) {
-          const { user: appUser, error } = mapSupabaseUserToAppUser(session.user);
-          if (appUser) {
-            setUser(appUser);
-            addNotification(`SESSION RESTORED: ${appUser.github_username.toUpperCase()}`, 'info');
-          } else if (error) {
-            setLoginError(error);
-            await signOut();
-          }
-        }
-      } catch (err) {
-        console.error('Auth Init Error:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    initAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-         const { user: appUser, error } = mapSupabaseUserToAppUser(session.user);
-         if (appUser) {
-           setUser(appUser);
-           addNotification('AUTHENTICATION SUCCESSFUL');
-         } else {
-           setLoginError(error || 'ACCESS DENIED');
-           await signOut();
-         }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  // App State
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const addNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
@@ -84,18 +32,93 @@ const App: React.FC = () => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
+  // 1. Data Fetching
+  const refreshData = async () => {
+    setIsDataLoading(true);
+    try {
+      const [fetchedProjects, fetchedTasks] = await Promise.all([
+        api.getProjects(),
+        api.getTasks()
+      ]);
+      setProjects(fetchedProjects);
+      setTasks(fetchedTasks);
+    } catch (err) {
+      console.error('Data Load Error:', err);
+      addNotification('DATA SYNC FAILED', 'error');
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
+  // 2. Auth & Session Management
+  useEffect(() => {
+    if (!isConfigured) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    const initAuth = async () => {
+      setIsAuthLoading(true);
+      try {
+        const { session } = await getCurrentSession();
+        if (session) {
+          const { user: appUser, error } = await syncUserProfile(session.user);
+          if (appUser) {
+            setUser(appUser);
+            addNotification(`SESSION RESTORED: ${appUser.github_username.toUpperCase()}`, 'info');
+            refreshData(); // Fetch data after auth
+          } else if (error) {
+            setLoginError(error);
+            await signOut();
+          }
+        }
+      } catch (err) {
+        console.error('Auth Init Error:', err);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+         // Prevent double loading if already handled by initAuth
+         if (!user) {
+            setIsAuthLoading(true);
+            const { user: appUser, error } = await syncUserProfile(session.user);
+            setIsAuthLoading(false);
+            
+            if (appUser) {
+              setUser(appUser);
+              addNotification('AUTHENTICATION SUCCESSFUL');
+              refreshData();
+            } else {
+              setLoginError(error || 'ACCESS DENIED');
+              await signOut();
+            }
+         }
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProjects([]);
+        setTasks([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [user]); 
+
+  // 3. Handlers
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    setIsAuthLoading(true);
     setLoginError(null);
-
     const { error } = await signInWithGithub();
     if (error) {
       setLoginError(error.message);
-      setIsLoading(false);
+      setIsAuthLoading(false);
       addNotification('CONNECTION FAILED', 'error');
     }
-    // No need to set loading false here if successful, as redirect happens
   };
 
   const handleLogout = async () => {
@@ -106,59 +129,116 @@ const App: React.FC = () => {
   };
 
   // Project Handlers
-  const handleAddProject = (newProjectData: Omit<Project, 'id' | 'created_at' | 'owner_id' | 'score_market' | 'score_tech' | 'status'>) => {
+  const handleAddProject = async (newProjectData: Omit<Project, 'id' | 'created_at' | 'owner_id' | 'score_market' | 'score_tech' | 'status'>) => {
     if (!user) return;
-    const newProject: Project = {
-      id: `p${Date.now()}`,
-      ...newProjectData,
-      status: 'Idea',
-      owner_id: user.id,
-      score_market: Math.floor(Math.random() * 100),
-      score_tech: Math.floor(Math.random() * 100),
-      created_at: new Date().toISOString()
-    };
-    setProjects(prev => [...prev, newProject]);
-    addNotification('PROJECT INITIALIZED');
+    try {
+      const newProject = await api.createProject({
+        ...newProjectData,
+        owner_id: user.id,
+        status: 'Idea',
+        score_market: Math.floor(Math.random() * 100), // AI placeholder logic
+        score_tech: Math.floor(Math.random() * 100)
+      });
+      setProjects(prev => [newProject, ...prev]);
+      addNotification('PROJECT INITIALIZED');
+    } catch (err) {
+      addNotification('FAILED TO CREATE PROJECT', 'error');
+    }
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
+  const handleUpdateProject = async (id: string, updates: Partial<Project>) => {
+    // Optimistic Update
+    const oldProjects = [...projects];
     setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    
+    try {
+      await api.updateProject(id, updates);
+    } catch (err) {
+      setProjects(oldProjects); // Revert
+      addNotification('UPDATE FAILED', 'error');
+    }
   };
 
-  const handleDeleteProject = (id: string) => {
+  const handleDeleteProject = async (id: string) => {
     if (confirm('CONFIRM DELETION? This action is irreversible.')) {
-      setProjects(prev => prev.filter(p => p.id !== id));
-      addNotification('PROJECT TERMINATED', 'info');
+      try {
+        await api.deleteProject(id);
+        setProjects(prev => prev.filter(p => p.id !== id));
+        addNotification('PROJECT TERMINATED', 'info');
+      } catch (err) {
+        addNotification('DELETION FAILED', 'error');
+      }
     }
   };
 
   // Task Handlers
-  const handleAddTask = (taskData: Partial<Task>) => {
+  const handleAddTask = async (taskData: Partial<Task>) => {
     if (!user) return;
-    const newTask: Task = {
-      id: `t${Date.now()}`,
-      description: taskData.description || 'New Task',
-      project_id: taskData.project_id || projects[0]?.id || 'unknown',
-      assigned_to: user.id,
-      status: 'Todo',
-      is_blocker: taskData.is_blocker || false,
-      created_at: new Date().toISOString()
-    };
-    setTasks(prev => [newTask, ...prev]);
-    addNotification(newTask.is_blocker ? 'CRITICAL ALERT REPORTED' : 'PROTOCOL ESTABLISHED');
-  };
-
-  const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
-    if (updates.status === 'Done') {
-      addNotification('PROTOCOL COMPLETED');
+    try {
+      const newTask = await api.createTask({
+        description: taskData.description || 'New Task',
+        project_id: taskData.project_id,
+        assigned_to: user.id,
+        status: 'Todo',
+        is_blocker: taskData.is_blocker || false,
+      });
+      setTasks(prev => [newTask, ...prev]);
+      addNotification(newTask.is_blocker ? 'CRITICAL ALERT REPORTED' : 'PROTOCOL ESTABLISHED');
+    } catch (err) {
+      addNotification('FAILED TO ASSIGN TASK', 'error');
     }
   };
 
-  const handleDeleteTask = (taskId: string) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    addNotification('PROTOCOL PURGED', 'info');
+  const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
+    // Optimistic Update
+    const oldTasks = [...tasks];
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+    
+    try {
+      await api.updateTask(taskId, updates);
+      if (updates.status === 'Done') {
+        addNotification('PROTOCOL COMPLETED');
+      }
+    } catch (err) {
+      setTasks(oldTasks); // Revert
+      addNotification('UPDATE FAILED', 'error');
+    }
   };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await api.deleteTask(taskId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      addNotification('PROTOCOL PURGED', 'info');
+    } catch (err) {
+      addNotification('DELETION FAILED', 'error');
+    }
+  };
+
+  // CONFIGURATION ERROR STATE
+  if (!isConfigured) {
+    return (
+      <div className="min-h-screen bg-carbon flex flex-col items-center justify-center p-4">
+         <div className="max-w-md w-full bg-surface border border-red-500/50 p-8 shadow-[0_0_50px_rgba(239,68,68,0.2)]">
+            <div className="flex items-center gap-3 mb-6 text-red-500">
+              <ShieldAlert size={32} />
+              <h1 className="text-xl font-mono font-bold tracking-wider">SYSTEM_HALTED</h1>
+            </div>
+            <p className="text-offwhite font-mono text-sm mb-4">
+              Critical configuration missing. The application cannot establish a link to the central database.
+            </p>
+            <div className="bg-carbon p-4 border border-border mb-6">
+              <p className="text-[10px] text-silver font-mono mb-2 uppercase">Required Environment Variables</p>
+              <code className="block text-xs text-accent font-mono">VITE_SUPABASE_URL</code>
+              <code className="block text-xs text-accent font-mono">VITE_SUPABASE_ANON_KEY</code>
+            </div>
+            <p className="text-xs text-silver">
+              Please check your deployment settings or .env file and reboot the system.
+            </p>
+         </div>
+      </div>
+    )
+  }
 
   if (!user) {
     return (
@@ -198,10 +278,10 @@ const App: React.FC = () => {
               <Button 
                 onClick={handleLogin} 
                 className="w-full h-12" 
-                disabled={isLoading}
-                icon={isLoading ? <Loader2 className="animate-spin" size={20} /> : <Github size={20} />}
+                disabled={isAuthLoading}
+                icon={isAuthLoading ? <Loader2 className="animate-spin" size={20} /> : <Github size={20} />}
               >
-                {isLoading ? 'ESTABLISHING UPLINK...' : 'CONNECT_GITHUB'}
+                {isAuthLoading ? 'ESTABLISHING UPLINK...' : 'CONNECT_GITHUB'}
               </Button>
             </div>
 

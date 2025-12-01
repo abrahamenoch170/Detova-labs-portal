@@ -218,7 +218,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, tasks, projects, onA
            <Card className="border-dashed border-silver/20 flex flex-col items-center justify-center py-12 bg-transparent hover:shadow-none hover:border-accent/30">
              <CheckCircle className="text-accent/50 mb-4" size={48} />
              <p className="text-offwhite font-mono text-lg mb-1">ALL SYSTEMS NOMINAL</p>
-             <p className="text-silver text-sm">No active protocols assigned.</p>
+             <p className="text-silver text-sm">Awaiting directives.</p>
            </Card>
         ) : (
           <div className="space-y-3">

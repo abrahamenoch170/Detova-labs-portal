@@ -6,9 +6,10 @@ import { Resources } from './pages/Resources';
 import { Button } from './components/ui/Button';
 import { ToastContainer } from './components/ui/Toast';
 import { View, User, Project, Task, Notification } from './types';
-import { login } from './services/auth';
+import { signInWithGithub, signOut, getCurrentSession, mapSupabaseUserToAppUser } from './services/auth';
+import { supabase } from './lib/supabase';
 import { INITIAL_PROJECTS, INITIAL_TASKS } from './constants';
-import { ShieldAlert, Terminal } from 'lucide-react';
+import { ShieldAlert, Terminal, Github, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
   // Persistence Helpers
@@ -17,11 +18,10 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : fallback;
   };
 
-  const [user, setUser] = useState<User | null>(() => loadState('detova_user', null));
+  const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<View>('dashboard');
-  const [usernameInput, setUsernameInput] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   
   // App State with Persistence
@@ -29,9 +29,51 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>(() => loadState('detova_tasks', INITIAL_TASKS));
 
   // Persistence Effects
-  useEffect(() => localStorage.setItem('detova_user', JSON.stringify(user)), [user]);
   useEffect(() => localStorage.setItem('detova_projects', JSON.stringify(projects)), [projects]);
   useEffect(() => localStorage.setItem('detova_tasks', JSON.stringify(tasks)), [tasks]);
+
+  // Auth Session Check
+  useEffect(() => {
+    const initAuth = async () => {
+      setIsLoading(true);
+      try {
+        const { session } = await getCurrentSession();
+        if (session) {
+          const { user: appUser, error } = mapSupabaseUserToAppUser(session.user);
+          if (appUser) {
+            setUser(appUser);
+            addNotification(`SESSION RESTORED: ${appUser.github_username.toUpperCase()}`, 'info');
+          } else if (error) {
+            setLoginError(error);
+            await signOut();
+          }
+        }
+      } catch (err) {
+        console.error('Auth Init Error:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+         const { user: appUser, error } = mapSupabaseUserToAppUser(session.user);
+         if (appUser) {
+           setUser(appUser);
+           addNotification('AUTHENTICATION SUCCESSFUL');
+         } else {
+           setLoginError(error || 'ACCESS DENIED');
+           await signOut();
+         }
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const addNotification = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString();
@@ -47,26 +89,20 @@ const App: React.FC = () => {
     setIsLoading(true);
     setLoginError(null);
 
-    try {
-      const result = await login(usernameInput.toLowerCase().trim());
-      if (result.success && result.user) {
-        setUser(result.user);
-        addNotification(`WELCOME BACK, ${result.user.full_name}`);
-      } else {
-        setLoginError(result.error || 'Authentication Failed');
-        addNotification('ACCESS DENIED', 'error');
-      }
-    } catch (err) {
-      setLoginError('System Malfunction');
-    } finally {
+    const { error } = await signInWithGithub();
+    if (error) {
+      setLoginError(error.message);
       setIsLoading(false);
+      addNotification('CONNECTION FAILED', 'error');
     }
+    // No need to set loading false here if successful, as redirect happens
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut();
     setUser(null);
     setCurrentView('dashboard');
-    localStorage.removeItem('detova_user');
+    addNotification('SESSION TERMINATED', 'info');
   };
 
   // Project Handlers
@@ -136,7 +172,7 @@ const App: React.FC = () => {
 
         <div className="w-full max-w-md z-10">
           <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-accent mb-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-accent mb-4 animate-pulse">
               <Terminal size={32} className="text-carbon" />
             </div>
             <h1 className="text-3xl font-mono font-bold text-offwhite tracking-tighter">DETOVA_LABS</h1>
@@ -153,35 +189,27 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div>
-                <label className="block text-xs font-mono text-silver mb-2 uppercase">Identity Verification</label>
-                <input 
-                  type="text" 
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  className="w-full bg-carbon border border-border p-4 text-offwhite focus:border-accent focus:outline-none font-mono text-center tracking-wider"
-                  placeholder="GITHUB_USERNAME"
-                  autoFocus
-                />
+            <div className="space-y-6">
+              <div className="text-center">
+                <p className="text-[10px] font-mono text-silver mb-2 uppercase">Identity Verification Required</p>
+                <div className="h-px bg-border w-1/2 mx-auto mb-6"></div>
               </div>
+              
               <Button 
-                type="submit" 
-                className="w-full" 
+                onClick={handleLogin} 
+                className="w-full h-12" 
                 disabled={isLoading}
+                icon={isLoading ? <Loader2 className="animate-spin" size={20} /> : <Github size={20} />}
               >
-                {isLoading ? 'AUTHENTICATING...' : 'ACCESS_SYSTEM'}
+                {isLoading ? 'ESTABLISHING UPLINK...' : 'CONNECT_GITHUB'}
               </Button>
-            </form>
+            </div>
 
-            <div className="mt-6 text-center">
+            <div className="mt-8 text-center">
               <p className="text-[10px] text-silver/30 font-mono">
-                AUTHORIZED PERSONNEL ONLY.
+                SECURE HANDSHAKE PROTOCOL v2.1
                 <br/>
-                ALL ACTIVITY IS LOGGED.
-              </p>
-              <p className="text-[10px] text-silver/20 font-mono mt-2">
-                Allowed: 'demi_dev', 'ayomide_code'
+                UNAUTHORIZED ACCESS IS A FEDERAL OFFENSE.
               </p>
             </div>
           </div>
